@@ -1,0 +1,25 @@
+[project]
+name = "so101eval"
+version = "0.0.0"
+requires-python = ">=3.12"
+dependencies = [
+    "inspect-robots==0.60.0",
+    "inspect-robots-agent==0.28.0",
+    "inspect-robots-so101 @ git+https://github.com/robocurve/inspect-robots-so101@096d89e12a9e31228fa57a7e5b7d236b09f3db6e",
+    "ikpy==4.1.0",
+    "mujoco==3.14.0",  # the sim, and the pair's arm-vs-arm guard on hardware too
+]
+
+[project.optional-dependencies]
+hardware = ["lerobot[feetech]==0.6.1"]  # real arm only (Linux)
+
+[project.entry-points."inspect_robots.embodiments"]
+so_arm_cartesian = "so101_cartesian:SOArmCartesian"
+so_arm_pair_sim = "so101_sim:SOArmPairSim"
+
+[project.entry-points."inspect_robots.tasks"]
+pick-cube = "so101_tasks:pick_cube"  # loading it registers every @task and so101_demo's policies
+
+[tool.setuptools]
+# Editable install only (pip install -e .): the URDF and so101_mjcf/ aren't packaged.
+py-modules = ["so101_cartesian", "so101_demo", "so101_pair", "so101_sim", "so101_tasks"]

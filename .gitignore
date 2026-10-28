@@ -1,0 +1,9 @@
+.venv/
+.env
+logs/
+__pycache__/
+*.egg-info/
+MUJOCO_LOG.TXT
+# private planning notes
+RESEARCH.md
+VLA_BENCHMARK.md
