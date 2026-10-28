@@ -41,6 +41,61 @@ def pick_cube(num_scenes: int = 10, max_seconds: float = 120.0, free: bool = Fal
     )
 
 
+def seeded(name: str, setup: str, instruction: str, target: Target, n: int, secs: float) -> Task:
+    """``n`` scenes of one setup, each its own seeded layout."""
+    return Task(
+        name=name,
+        scenes=[
+            Scene(
+                id=f"{setup}-{i}", instruction=instruction, init_seed=i, setup=setup, target=target
+            )
+            for i in range(n)
+        ],
+        scorer=SCORERS,
+        max_seconds=secs,
+    )
+
+
+@task("place")
+def place(num_scenes: int = 10, max_seconds: float = 120.0) -> Task:
+    """Put a cube on a pad."""
+    instruction = "Put the red cube on the green square and let go."
+    target = Target("on_pad", {"placed": {"cube": "pad"}})
+    return seeded("place", "place", instruction, target, num_scenes, max_seconds)
+
+
+@task("handover")
+def handover(num_scenes: int = 10, max_seconds: float = 180.0) -> Task:
+    """Only the left arm reaches the cube and only the right arm reaches the pad, so the
+    arms must pass the cube between them (hand to hand, or set down where both reach)."""
+    instruction = (
+        "Put the red cube on the green square and let go. Only the left arm can reach the "
+        "cube and only the right arm can reach the square."
+    )
+    target = Target("on_pad", {"placed": {"cube": "pad"}})
+    return seeded("handover", "handover", instruction, target, num_scenes, max_seconds)
+
+
+@task("stack")
+def stack(num_scenes: int = 10, max_seconds: float = 120.0) -> Task:
+    """Stack one cube on another."""
+    instruction = "Stack the red cube on top of the blue cube and let go."
+    target = Target("stacked", {"top": "red", "bottom": "blue"})
+    return seeded("stack", "stack", instruction, target, num_scenes, max_seconds)
+
+
+@task("sort")
+def sort(num_scenes: int = 10, max_seconds: float = 300.0) -> Task:
+    """Sort four cubes onto the pad of their color."""
+    instruction = (
+        "Put each red cube on the pink square and each blue cube on the light blue square, "
+        "side by side (not stacked), and let go."
+    )
+    placed = {"red_1": "red_pad", "red_2": "red_pad", "blue_1": "blue_pad", "blue_2": "blue_pad"}
+    target = Target("on_pad", {"placed": placed})
+    return seeded("sort", "sort", instruction, target, num_scenes, max_seconds)
+
+
 @task("imitate")
 def imitate(demo: str, same_world: bool = True, max_seconds: float = 120.0) -> Task:
     """Each successful demo's task, shown the demo's moves and frames.

@@ -13,6 +13,7 @@ viewer for a human teleoperating the sim, and paces the sim to the wall clock.
 """
 
 import dataclasses
+import itertools
 import time
 from collections.abc import Callable
 from typing import Any
@@ -39,19 +40,97 @@ is +y, the image centre is the table point x=0.14, y=0, and one pixel spans abou
 centre). `left_wrist_cam` and `right_wrist_cam` ride on the grippers."""
 
 
-def cube(spec: mujoco.MjSpec, rng: np.random.Generator) -> None:
-    """A 3 cm red cube on the table where at least one arm reaches it."""
-    body = spec.worldbody.add_body(
-        name="cube", pos=[rng.uniform(0.20, 0.27), rng.uniform(-0.15, 0.15), 0.015]
-    )
+RED, BLUE, GREEN = [0.85, 0.1, 0.1, 1], [0.1, 0.25, 0.85, 1], [0.2, 0.7, 0.3, 1]
+PAD_HALF = 0.04  # pads are 8 cm squares: room for two cubes
+# Across the table (y, table frame) the left arm reaches only above -0.05 and the right
+# only below 0.05. A cube at y >= 0.12 is the left's alone and a pad whose near edge is at
+# -0.11 the right's alone, each with a cube's width or more to spare, so a nudge or a slide
+# can't finish a handover with one arm. One arm's side (ONE_ARM) holds a whole scene for
+# that arm. Every spot below is inside x 0.16-0.30, both workspaces.
+LEFT_ONLY, RIGHT_ONLY = (0.12, 0.22), (-0.24, -0.15)
+ONE_ARM = ((-0.03, 0.15), (-0.15, 0.03))  # left's side, right's side
+
+
+def add_cube(spec: mujoco.MjSpec, name: str, xy, rgba: list[float]) -> None:
+    """A 3 cm cube resting on the table at ``xy``."""
+    body = spec.worldbody.add_body(name=name, pos=[*xy, 0.015])
     body.add_freejoint()
     body.add_geom(  # contact settings from Menagerie's scene_box.xml
         type=mujoco.mjtGeom.mjGEOM_BOX,
         size=[0.015] * 3,
-        rgba=[0.85, 0.1, 0.1, 1],
+        rgba=rgba,
         friction=[1, 0.03, 0.003],
         solref=[0.01, 1],
     )
+
+
+def add_pad(spec: mujoco.MjSpec, name: str, xy, rgba: list[float]) -> None:
+    """A flat colored square on the table; nothing collides with it, it only marks a spot."""
+    spec.worldbody.add_geom(
+        name=name,
+        type=mujoco.mjtGeom.mjGEOM_BOX,
+        pos=[*xy, 0.0005],
+        size=[PAD_HALF, PAD_HALF, 0.0005],
+        rgba=rgba,
+        contype=0,
+        conaffinity=0,
+    )
+
+
+def spots(rng: np.random.Generator, n: int, gap: float, x=(0.20, 0.27), y=(-0.15, 0.15)):
+    """``n`` random table points in the box, at least ``gap`` m apart."""
+    # ponytail: rejection sampling; sort's 4 cubes take ~10 tries, the rest one or two
+    while True:
+        pts = rng.uniform((x[0], y[0]), (x[1], y[1]), size=(n, 2))
+        if all(np.linalg.norm(a - b) >= gap for a, b in itertools.combinations(pts, 2)):
+            return pts
+
+
+def cube(spec: mujoco.MjSpec, rng: np.random.Generator) -> None:
+    """A 3 cm red cube on the table where at least one arm reaches it."""
+    # Two scalar draws, as before: recorded demos pin their world by seed.
+    add_cube(spec, "cube", (rng.uniform(0.20, 0.27), rng.uniform(-0.15, 0.15)), RED)
+
+
+def place(spec: mujoco.MjSpec, rng: np.random.Generator) -> None:
+    """A red cube and a green pad at least 10 cm apart, both on one arm's side."""
+    c, p = spots(rng, 2, 0.10, y=ONE_ARM[rng.integers(2)])
+    add_cube(spec, "cube", c, RED)
+    add_pad(spec, "pad", p, GREEN)
+
+
+def handover(spec: mujoco.MjSpec, rng: np.random.Generator) -> None:
+    """A red cube only the left arm reaches and a green pad only the right arm reaches."""
+    add_cube(spec, "cube", rng.uniform((0.20, LEFT_ONLY[0]), (0.27, LEFT_ONLY[1])), RED)
+    add_pad(spec, "pad", rng.uniform((0.20, RIGHT_ONLY[0]), (0.27, RIGHT_ONLY[1])), GREEN)
+
+
+def stack(spec: mujoco.MjSpec, rng: np.random.Generator) -> None:
+    """A red and a blue cube at least 6 cm apart, both on one arm's side."""
+    r, b = spots(rng, 2, 0.06, y=ONE_ARM[rng.integers(2)])
+    add_cube(spec, "red", r, RED)
+    add_cube(spec, "blue", b, BLUE)
+
+
+def sort(spec: mujoco.MjSpec, rng: np.random.Generator) -> None:
+    """Two red and two blue cubes in the middle, a red and a blue pad at the sides. Which
+    side is which is seeded, so a policy can't memorize it."""
+    sides = [(0.24, 0.17), (0.24, -0.17)]
+    rng.shuffle(sides)
+    add_pad(spec, "red_pad", sides[0], [0.95, 0.6, 0.6, 1])
+    add_pad(spec, "blue_pad", sides[1], [0.6, 0.7, 0.95, 1])
+    pts = spots(rng, 4, 0.05, x=(0.19, 0.29), y=(-0.09, 0.09))
+    for name, rgba, xy in zip(("red_1", "red_2", "blue_1", "blue_2"), (RED, RED, BLUE, BLUE), pts):
+        add_cube(spec, name, xy, rgba)
+
+
+def speed(world: "World", body: str) -> float:
+    """The body's linear speed, m/s."""
+    # ponytail: mj_objectVelocity after mj_step is one timestep (5 ms) old; fine for "at rest"
+    vel = np.zeros(6)  # (angular, linear), world-aligned
+    b = world.data.body(body).id
+    mujoco.mj_objectVelocity(world.model, world.data, mujoco.mjtObj.mjOBJ_BODY, b, vel, 0)
+    return float(np.linalg.norm(vel[3:]))
 
 
 def lifted(world: "World", body: str = "cube", height: float = 0.05) -> bool:
@@ -64,18 +143,49 @@ def at_rest(
 ) -> bool:
     """Every ``goal`` body is within ``tol_m`` of its ``[x, y, z]`` and slower than
     ``max_speed`` m/s, so one falling or sliding through its goal doesn't count."""
-    # ponytail: mj_objectVelocity after mj_step is one timestep (5 ms) old; fine for "at rest"
-    vel = np.zeros(6)  # (angular, linear), world-aligned
-    for body, xyz in goal.items():
-        b = world.data.body(body)
-        mujoco.mj_objectVelocity(world.model, world.data, mujoco.mjtObj.mjOBJ_BODY, b.id, vel, 0)
-        if np.linalg.norm(b.xpos - xyz) > tol_m or np.linalg.norm(vel[3:]) >= max_speed:
-            return False
-    return True
+    return all(
+        np.linalg.norm(world.data.body(b).xpos - xyz) <= tol_m and speed(world, b) < max_speed
+        for b, xyz in goal.items()
+    )
 
 
-SETUPS: dict[str, Callable[[mujoco.MjSpec, np.random.Generator], None]] = {"cube": cube}
-TARGETS: dict[str, Callable[..., bool]] = {"lifted": lifted, "at_rest": at_rest}
+def on_pad(world: "World", placed: dict[str, str], max_speed: float = 0.01) -> bool:
+    """Every ``placed`` body rests on the table with its center over its pad: not held
+    above it, not sliding across it."""
+    return all(
+        np.abs(world.data.body(b).xpos[:2] - world.data.geom(pad).xpos[:2]).max() <= PAD_HALF
+        and world.data.body(b).xpos[2] <= 0.02  # a resting cube's center is at 0.015
+        and speed(world, b) < max_speed
+        for b, pad in placed.items()
+    )
+
+
+def stacked(world: "World", top: str, bottom: str, tol_m: float = 0.015) -> bool:
+    """``top`` rests on ``bottom``: centers within ``tol_m`` across and one cube (3 cm)
+    apart up, ``bottom`` on the table, both still."""
+    t, b = world.data.body(top).xpos, world.data.body(bottom).xpos
+    return bool(
+        np.linalg.norm(t[:2] - b[:2]) <= tol_m
+        and abs(t[2] - b[2] - 0.03) <= 0.005
+        and b[2] <= 0.02
+        and speed(world, top) < 0.01
+        and speed(world, bottom) < 0.01
+    )
+
+
+SETUPS: dict[str, Callable[[mujoco.MjSpec, np.random.Generator], None]] = {
+    "cube": cube,
+    "place": place,
+    "handover": handover,
+    "stack": stack,
+    "sort": sort,
+}
+TARGETS: dict[str, Callable[..., bool]] = {
+    "lifted": lifted,
+    "at_rest": at_rest,
+    "on_pad": on_pad,
+    "stacked": stacked,
+}
 
 
 class World:

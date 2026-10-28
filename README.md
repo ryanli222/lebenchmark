@@ -28,6 +28,10 @@ human teleoperation on the same tasks. Built on
 | Task | What it asks |
 |---|---|
 | `pick-cube` | Pick up a cube placed where at least one arm reaches it |
+| `place` | Put a cube on a green pad (both on one arm's side) |
+| `handover` | Put a cube on a pad, where only the left arm reaches the cube and only the right arm reaches the pad |
+| `stack` | Stack the red cube on the blue cube |
+| `sort` | Put two red and two blue cubes on the pad of their color (pad sides change per seed) |
 | `imitate` | Repeat a recorded demo, shown its moves and frames (same or new layout) |
 | `match-goal` | Make the scene match the end of a recorded demo, from a goal image |
 
@@ -40,7 +44,7 @@ human teleoperation on the same tasks. Built on
 | `so101_sim.py` | MuJoCo sim of the pair, scene setups and success checks |
 | `so101_demo.py` | Leader-arm teleop policy, demo recording, demo-in-context agent |
 | `so101_tasks.py` | Task definitions |
-| `test_so101_*.py` | Self-checks (`python test_so101_pair.py`) |
+| `test_so101_*.py` | Self-checks (`python test_so101_scenes.py`, one at a time) |
 
 ## Run
 
